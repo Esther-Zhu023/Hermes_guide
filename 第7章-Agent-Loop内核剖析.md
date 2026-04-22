@@ -1,14 +1,14 @@
-# 第七章 Agent Loop 内核剖析
+## 第七章：Agent Loop 内核剖析
 
-> 本章目标：深入理解 Hermes 的核心执行机制，掌握请求生命周期、事件驱动模型和工具调度原理
-> 前置知识：第三章工具系统、第二章配置体系
-> 源码位置：`run_agent.py`、`tools/registry.py`、`model_tools.py`、`hermes_state.py`
+### 章节引言
+
+理解 Hermes 的内核机制是成为高级用户和开发者的必经之路。本章将深入解析 Agent Loop 的核心循环结构、工具注册与调度系统、上下文管理机制和状态持久化原理。通过学习，你将能够理解 Hermes 如何处理用户请求、如何调用工具、如何管理对话历史，以及如何实现自动压缩。前置知识包括第三章的工具系统和第四章的消息网关。
 
 ---
 
-## 7.1 消息完整生命周期
+### 7.1 消息完整生命周期
 
-### 7.1.1 端到端流程图
+#### 7.1.1 端到端流程图
 
 ```
 用户输入
@@ -42,7 +42,7 @@
 流式输出 → 返回上游平台
 ```
 
-### 7.1.2 四层架构详解
+#### 7.1.2 四层架构详解
 
 | 层级 | 组件 | 说明 |
 |------|------|------|
@@ -53,11 +53,11 @@
 
 ---
 
-## 7.2 核心循环结构
+### 7.2 核心循环结构
+
+#### 7.2.1 主循环代码
 
 **源码**：`run_agent.py` 第 8464 行 `def run_conversation()`
-
-### 7.2.1 主循环代码
 
 ```python
 while (api_call_count < self.max_iterations and self.iteration_budget.remaining > 0) \
@@ -96,7 +96,7 @@ while (api_call_count < self.max_iterations and self.iteration_budget.remaining 
         break
 ```
 
-### 7.2.2 迭代预算控制
+#### 7.2.2 迭代预算控制
 
 ```python
 class IterationBudget:
@@ -125,9 +125,9 @@ class IterationBudget:
 
 ---
 
-## 7.3 工具注册机制
+### 7.3 工具注册机制
 
-### 7.3.1 自注册模式
+#### 7.3.1 自注册模式
 
 **源码**：`tools/registry.py`
 
@@ -161,7 +161,7 @@ def register():
 register()
 ```
 
-### 7.3.2 ToolRegistry 类
+#### 7.3.2 ToolRegistry 类
 
 ```python
 class ToolRegistry:
@@ -173,13 +173,7 @@ class ToolRegistry:
 
     def register(self, name, toolset, schema, handler, check_fn=None):
         with self._lock:
-            self._tools[name] = ToolEntry(
-                name=name,
-                toolset=toolset,
-                schema=schema,
-                handler=handler,
-                check_fn=check_fn,
-            )
+            self._tools[name] = ToolEntry(...)
 
     def dispatch(self, name, args, **kwargs):
         tool = self._tools.get(name)
@@ -191,13 +185,9 @@ class ToolRegistry:
         """返回工具 schema 列表（仅包含 check_fn 通过的工具）"""
         return [t.schema for t in self._tools.values()
                 if t.name in tool_names and t.check_fn()]
-
-    def get_schema(self, name):
-        """获取单个工具的 schema"""
-        return self._tools[name].schema
 ```
 
-### 7.3.3 工具发现流程
+#### 7.3.3 工具发现流程
 
 ```python
 # model_tools.py
@@ -212,9 +202,9 @@ def discover_builtin_tools():
 
 ---
 
-## 7.4 工具调度
+### 7.4 工具调度
 
-### 7.4.1 handle_function_call 入口
+#### 7.4.1 handle_function_call 入口
 
 **源码**：`model_tools.py`
 
@@ -251,7 +241,7 @@ def handle_function_call(
     return result
 ```
 
-### 7.4.2 参数类型强制转换
+#### 7.4.2 参数类型强制转换
 
 ```python
 def coerce_tool_args(tool_name: str, args: Dict) -> Dict:
@@ -275,7 +265,7 @@ def coerce_tool_args(tool_name: str, args: Dict) -> Dict:
     return args
 ```
 
-### 7.4.3 异步事件循环管理
+#### 7.4.3 异步事件循环管理
 
 ```python
 # 避免 "Event loop is closed" 错误
@@ -308,9 +298,9 @@ def _run_async(coro):
 
 ---
 
-## 7.5 工具执行策略
+### 7.5 工具执行策略
 
-### 7.5.1 顺序执行 vs 并发执行
+#### 7.5.1 顺序执行 vs 并发执行
 
 ```python
 def _execute_tool_calls_sequential(tool_calls, ...):
@@ -332,12 +322,10 @@ def _execute_tool_calls_concurrent(tool_calls, ...):
 
     # 按路径隔离的文件操作可并行
     path_groups = group_by_file_path(tool_calls, path_scoped)
-
-    # 其他工具顺序执行
     # ...
 ```
 
-### 7.5.2 工具分类
+#### 7.5.2 工具分类
 
 | 类别 | 工具 | 执行方式 |
 |------|------|----------|
@@ -346,7 +334,7 @@ def _execute_tool_calls_concurrent(tool_calls, ...):
 | **Path Scoped** | `read_file`, `write_file`, `patch` | 按路径隔离并行 |
 | **其他** | `terminal`, `delegate_task` 等 | 顺序执行 |
 
-### 7.5.3 execute_code 预算退款
+#### 7.5.3 execute_code 预算退款
 
 ```python
 def execute_code(..., enabled_tools=None):
@@ -365,9 +353,9 @@ def execute_code(..., enabled_tools=None):
 
 ---
 
-## 7.6 上下文管理
+### 7.6 上下文管理
 
-### 7.6.1 消息准备
+#### 7.6.1 消息准备
 
 ```python
 def _prepare_api_messages(messages: List[Dict]) -> List[Dict]:
@@ -392,7 +380,7 @@ def _prepare_api_messages(messages: List[Dict]) -> List[Dict]:
     return api_messages
 ```
 
-### 7.6.2 上下文压缩
+#### 7.6.2 上下文压缩
 
 ```python
 class ContextCompressor:
@@ -416,9 +404,9 @@ class ContextCompressor:
         # 4. 更新 parent_session_id 追踪链
 ```
 
-### 7.6.3 压缩流程
+#### 7.6.3 压缩流程
 
-```
+```bash
 压缩前: [S, M1, M2, M3, M4, ..., M100, M101, M102]
                  ↓
 压缩后: [S, SUMMARY(M1-M100), M101, M102]
@@ -428,9 +416,9 @@ class ContextCompressor:
 
 ---
 
-## 7.7 状态管理
+### 7.7 状态管理
 
-### 7.7.1 SQLite 数据库结构
+#### 7.7.1 SQLite 数据库结构
 
 **源码**：`hermes_state.py`
 
@@ -466,7 +454,7 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 PRAGMA journal_mode=WAL
 ```
 
-### 7.7.2 FTS5 全文搜索
+#### 7.7.2 FTS5 全文搜索
 
 ```python
 def session_search(query: str, limit: int = 10):
@@ -482,7 +470,7 @@ def session_search(query: str, limit: int = 10):
     return results
 ```
 
-### 7.7.3 会话链追踪
+#### 7.7.3 会话链追踪
 
 ```python
 # 压缩触发的会话分割
@@ -506,9 +494,9 @@ def get_session_chain(session_id):
 
 ---
 
-## 7.8 事件驱动模型
+### 7.8 事件驱动模型
 
-### 7.8.1 插件钩子系统
+#### 7.8.1 插件钩子系统
 
 ```python
 # hermes_cli/plugins.py
@@ -532,7 +520,7 @@ def invoke_hook(hook_name, **kwargs):
     return results
 ```
 
-### 7.8.2 钩子使用示例
+#### 7.8.2 钩子使用示例
 
 ```python
 class AuditPlugin:
@@ -554,9 +542,9 @@ register_plugin(AuditPlugin())
 
 ---
 
-## 7.9 错误处理与重试
+### 7.9 错误处理与重试
 
-### 7.9.1 API 调用重试
+#### 7.9.1 API 调用重试
 
 ```python
 def _streaming_api_call_with_retry(...)
@@ -578,7 +566,7 @@ def _streaming_api_call_with_retry(...)
     raise MaxRetriesExceeded()
 ```
 
-### 7.9.2 工具执行错误处理
+#### 7.9.2 工具执行错误处理
 
 ```python
 def handle_function_call(...):
@@ -598,9 +586,9 @@ def handle_function_call(...):
 
 ---
 
-## 7.10 本章小结
+### 7.10 本章小结
 
-### 核心概念总结
+#### 核心概念总结
 
 | 概念 | 源码位置 | 说明 |
 |------|----------|------|
@@ -613,7 +601,7 @@ def handle_function_call(...):
 | 状态持久化 | `hermes_state.py` | SQLite + FTS5 |
 | 插件钩子 | `plugins.py` | pre/post_tool_call 等 |
 
-### 关键源码文件
+#### 关键源码文件
 
 | 文件 | 功能 |
 |------|------|
@@ -623,7 +611,7 @@ def handle_function_call(...):
 | `hermes_state.py` | SQLite 状态、消息持久化、FTS5 |
 | `hermes_cli/plugins.py` | 插件系统、钩子管理 |
 
-### 调试命令
+#### 调试命令
 
 ```bash
 # 追踪完整请求流程
@@ -641,4 +629,4 @@ python run_agent.py --prompt "test"
 
 ---
 
-*下章预告：第八章 高级特性 - 语音模式、API服务器、MCP集成、RL训练*
+*源码索引：`run_agent.py`、`tools/registry.py`、`model_tools.py`、`hermes_state.py`*
